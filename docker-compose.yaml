@@ -1,0 +1,168 @@
+services:
+  # Main Laravel Application
+  queenhive:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    container_name: queenhive
+    volumes:
+      - .:/var/www/html:cached
+      - ./storage:/var/www/html/storage:delegated
+      - ./vendor:/var/www/html/vendor:delegated
+      - ./node_modules:/var/www/html/node_modules:delegated
+    ports:
+      - "9000:9000"
+      - "5173:5173"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - APP_ENV=local
+      - APP_URL=http://localhost
+      - VITE_APP_URL=http://localhost
+      - VITE_HOST=0.0.0.0
+      - VITE_PORT=5173
+      - VITE_HMR_HOST=localhost
+    healthcheck:
+      test: [ "CMD", "php", "artisan", "health:check" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - hive-network
+
+  # Nginx Web Server
+  webserver:
+    image: nginx:alpine
+    container_name: queenhive-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - queenhive
+    networks:
+      - hive-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: queenhive-db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=queenhive
+      - POSTGRES_USER=hiveuser
+      - POSTGRES_PASSWORD=hivepass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveuser -d queenhive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hive-network
+
+  # Redis for Caching and Queue
+  redis:
+    image: redis:alpine
+    container_name: queenhive-redis
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - hive-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    sysctls:
+      net.core.somaxconn: 1024
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 20000
+        hard: 40000
+
+  # RabbitMQ for Message Queue
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: queenhive-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management interface
+    environment:
+      - RABBITMQ_DEFAULT_USER=hiveuser
+      - RABBITMQ_DEFAULT_PASS=hivepass
+      - RABBITMQ_DEFAULT_VHOST=/
+      - RABBITMQ_DISK_FREE_LIMIT=2GB
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+    networks:
+      - hive-network
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity && rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # Elasticsearch for Search and Logging
+  elasticsearch:
+    image: elasticsearch:7.17.9
+    container_name: queenhive-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - bootstrap.memory_lock=true
+    ports:
+      - "9200:9200"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - hive-network
+
+  # Kibana for Log Visualization
+  kibana:
+    image: kibana:7.17.9
+    container_name: queenhive-kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - hive-network
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+  esdata:
+  node_modules:  # Add this new volume
+
+networks:
+  hive-network:
+    driver: bridge
