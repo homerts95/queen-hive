@@ -112,19 +112,15 @@ services:
       - RABBITMQ_DISK_FREE_LIMIT=2GB
     volumes:
       - rabbitmqdata:/var/lib/rabbitmq
+      - ./docker/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     networks:
       - hive-network
     healthcheck:
-      test: rabbitmq-diagnostics check_port_connectivity && rabbitmq-diagnostics -q ping
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
       interval: 30s
-      timeout: 30s
+      timeout: 10s
       retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
 
   # Elasticsearch for Search and Logging
   elasticsearch:

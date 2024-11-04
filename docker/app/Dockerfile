@@ -23,7 +23,8 @@ RUN docker-php-ext-install pdo_pgsql mbstring exif pcntl bcmath gd soap \
     # Add intl extension
     && docker-php-ext-configure intl \
     && docker-php-ext-install intl
-
+# Install Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Create non-root user
 RUN useradd -G www-data -u 1000 -d /home/dev dev \
     && mkdir -p /home/dev/.composer \
